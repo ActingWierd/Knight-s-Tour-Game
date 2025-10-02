@@ -16,17 +16,24 @@ import javafx.scene.paint.Color;
 import javafx.scene.layout.StackPane;
 import java.util.Stack;
 
+
+
+
 public class ChessBoardKnight extends Application {
-    private static final int BOARD_SIZE = 8;
+    // Level selection fields
+    private Level[] levels = {
+        new Level("Easy (6x6)", 6, 10, 10, 5),
+        new Level("Classic (8x8)", 8, 10, 10, 5),
+        new Level("Hard (10x10)", 10, 15, 15, 10)
+    };
+    private Level currentLevel = levels[1]; // Default to Classic
+
     private static final int SQUARE_SIZE = 60;
-    private static final int POINTS_PER_MOVE = 10;
-    private static final int REVISIT_PENALTY = 10;
-    private static final int UNDO_PENALTY = 5;
     private static final int CONTROL_FONT_SIZE = 16;
     private static final int WIN_FONT_SIZE = 20;
 
-    private Button[][] squares = new Button[BOARD_SIZE][BOARD_SIZE];
-    private int[][] visitCount = new int[BOARD_SIZE][BOARD_SIZE];
+    private Button[][] squares;
+    private int[][] visitCount;
     private int knightRow = -1;
     private int knightCol = -1;
     private int score = 0;
@@ -48,30 +55,50 @@ public class ChessBoardKnight extends Application {
         }
     }
 
+
+
     @Override
     public void start(Stage primaryStage) {
         scoreLabel = new Label("Score: 0");
         scoreLabel.setFont(Font.font("Verdana", FontWeight.BOLD, CONTROL_FONT_SIZE));
 
-        moveCountLabel = new Label("Squares Visited: 0/64");
+        moveCountLabel = new Label();
         moveCountLabel.setFont(Font.font("Verdana", FontWeight.BOLD, CONTROL_FONT_SIZE));
 
         winLabel = new Label("");
         winLabel.setFont(Font.font("Impact", FontWeight.BOLD, WIN_FONT_SIZE));
         winLabel.setStyle("-fx-text-fill: #06D6A0;");
 
-        undoButton = new Button("Undo (-" + UNDO_PENALTY + " pts)");
+        undoButton = new Button();
         undoButton.setFont(Font.font(CONTROL_FONT_SIZE));
         undoButton.setDisable(true);
         undoButton.setOnAction(e -> undoMove());
 
-        GridPane board = createBoard();
+        // Level selector ComboBox
+        javafx.scene.control.ComboBox<Level> levelSelector = new javafx.scene.control.ComboBox<>(javafx.collections.FXCollections.observableArrayList(levels));
+        levelSelector.setCellFactory(lv -> new javafx.scene.control.ListCell<>() {
+            @Override protected void updateItem(Level item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.name);
+            }
+        });
+        levelSelector.setButtonCell(new javafx.scene.control.ListCell<>() {
+            @Override protected void updateItem(Level item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.name);
+            }
+        });
+        levelSelector.getSelectionModel().select(currentLevel);
+        levelSelector.setOnAction(e -> {
+            currentLevel = levelSelector.getValue();
+            resetGame();
+        });
 
-        HBox controls = new HBox(10, scoreLabel, moveCountLabel, undoButton);
+        HBox controls = new HBox(10, levelSelector, scoreLabel, moveCountLabel, undoButton);
         controls.setAlignment(Pos.CENTER);
         controls.setPadding(new Insets(5));
 
-        VBox root = new VBox(10, controls, winLabel, board);
+        VBox root = new VBox(10, controls, winLabel, createBoard());
         root.setAlignment(Pos.CENTER);
         root.setPadding(new Insets(10));
 
@@ -79,12 +106,14 @@ public class ChessBoardKnight extends Application {
         primaryStage.setTitle("Knight's Tour - Colorful Prototype");
         primaryStage.setScene(scene);
         primaryStage.show();
+        resetGame();
     }
 
     private GridPane createBoard() {
         GridPane board = new GridPane();
-        for (int row = 0; row < BOARD_SIZE; row++) {
-            for (int col = 0; col < BOARD_SIZE; col++) {
+        squares = new Button[currentLevel.boardSize][currentLevel.boardSize];
+        for (int row = 0; row < currentLevel.boardSize; row++) {
+            for (int col = 0; col < currentLevel.boardSize; col++) {
                 Button square = createSquare(row, col);
                 squares[row][col] = square;
                 board.add(square, col, row);
@@ -97,15 +126,13 @@ public class ChessBoardKnight extends Application {
         Button square = new Button();
         square.setPrefSize(SQUARE_SIZE, SQUARE_SIZE);
         square.setStyle(getSquareStyle(row, col, false));
-
         square.setOnAction(e -> handleSquareClick(row, col));
         return square;
     }
 
     private String getSquareStyle(int row, int col, boolean highlight) {
-        // Soft, complementary colors for non-classic board
-        String lightColor = "#80ED99"; // light green
-        String darkColor = "#3D8361";  // darker green
+        String lightColor = "#bfcf8f"; // new light green
+        String darkColor = "#769656"; // new dark green
         String baseColor = (row + col) % 2 == 0 ? lightColor : darkColor;
         String border = highlight ? "-fx-border-color: #FFD166; -fx-border-width: 3px;" : "";
         return "-fx-background-color: " + baseColor + "; -fx-background-radius: 8px; " + border;
@@ -119,13 +146,10 @@ public class ChessBoardKnight extends Application {
             undoButton.setDisable(false);
             return;
         }
-
         if (isLegalMove(row, col)) {
-            if (visitCount[row][col] == 0) score += POINTS_PER_MOVE;
-            else score -= REVISIT_PENALTY;
-
+            if (visitCount[row][col] == 0) score += currentLevel.pointsPerMove;
+            else score -= currentLevel.revisitPenalty;
             scoreLabel.setText("Score: " + score);
-
             placeKnight(row, col);
             updateVisitCount(row, col);
             moveHistory.push(new Move(row, col, score));
@@ -136,20 +160,18 @@ public class ChessBoardKnight extends Application {
     private void updateVisitCount(int row, int col) {
         visitCount[row][col]++;
         squares[row][col].setGraphic(createKnightLabel(visitCount[row][col]));
-
         int unique = countUniqueVisits();
-        moveCountLabel.setText(String.format("Squares Visited: %d/64", unique));
-
-        if (unique == 64) {
+        moveCountLabel.setText(String.format("Squares Visited: %d/%d", unique, currentLevel.boardSize * currentLevel.boardSize));
+        if (unique == currentLevel.boardSize * currentLevel.boardSize) {
             winLabel.setText("Congratulations! You won!");
             undoButton.setDisable(true);
         }
     }
 
     private Label createKnightLabel(int visitNumber) {
-        Label label = new Label("\u2658\n" + visitNumber); // White knight Unicode
+        Label label = new Label("\u2658\n" + visitNumber);
         label.setFont(Font.font("Segoe UI Symbol", 36));
-        label.setTextFill(Color.web("#EF476F")); // pink
+        label.setTextFill(Color.web("#EF476F"));
         label.setAlignment(Pos.CENTER);
         return label;
     }
@@ -186,8 +208,7 @@ public class ChessBoardKnight extends Application {
         if (moveHistory.isEmpty()) return;
         Move lastMove = moveHistory.pop();
         visitCount[knightRow][knightCol]--;
-        score -= UNDO_PENALTY;
-
+        score -= currentLevel.undoPenalty;
         if (moveHistory.isEmpty()) {
             knightRow = -1;
             knightCol = -1;
@@ -202,9 +223,8 @@ public class ChessBoardKnight extends Application {
             );
             squares[knightRow][knightCol].setGraphic(createKnightLabel(visitCount[knightRow][knightCol]));
         }
-
         scoreLabel.setText("Score: " + score);
-        moveCountLabel.setText(String.format("Squares Visited: %d/64", countUniqueVisits()));
+        moveCountLabel.setText(String.format("Squares Visited: %d/%d", countUniqueVisits(), currentLevel.boardSize * currentLevel.boardSize));
         winLabel.setText("");
         clearHighlights();
         highlightLegalMoves();
@@ -227,13 +247,28 @@ public class ChessBoardKnight extends Application {
     }
 
     private boolean isValidPosition(int row, int col) {
-        return row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE;
+        return row >= 0 && row < currentLevel.boardSize && col >= 0 && col < currentLevel.boardSize;
     }
 
     private void clearHighlights() {
-        for (int row = 0; row < BOARD_SIZE; row++)
-            for (int col = 0; col < BOARD_SIZE; col++)
+        for (int row = 0; row < currentLevel.boardSize; row++)
+            for (int col = 0; col < currentLevel.boardSize; col++)
                 squares[row][col].setStyle(getSquareStyle(row, col, false));
+    }
+
+    private void resetGame() {
+        knightRow = -1;
+        knightCol = -1;
+        score = 0;
+        moveHistory.clear();
+        visitCount = new int[currentLevel.boardSize][currentLevel.boardSize];
+        winLabel.setText("");
+        scoreLabel.setText("Score: 0");
+        moveCountLabel.setText(String.format("Squares Visited: 0/%d", currentLevel.boardSize * currentLevel.boardSize));
+        undoButton.setText("Undo (-" + currentLevel.undoPenalty + " pts)");
+        undoButton.setDisable(true);
+        VBox root = (VBox) scoreLabel.getScene().getRoot();
+        root.getChildren().set(2, createBoard()); // Corrected index from 3 to 2
     }
 
     public static void main(String[] args) {
