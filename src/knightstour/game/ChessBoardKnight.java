@@ -15,6 +15,9 @@ import javafx.scene.text.FontWeight;
 import javafx.scene.paint.Color;
 import javafx.scene.layout.StackPane;
 import java.util.Stack;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuBar;
+import javafx.scene.control.MenuItem;
 
 
 
@@ -55,58 +58,83 @@ public class ChessBoardKnight extends Application {
         }
     }
 
-
+    private GridPane boardPane;
+    private Stage mainStage;
+    private Scene menuScene;
+    private Scene gameScene;
+    private VBox menuRoot;
+    private VBox gameRoot;
+    private javafx.scene.control.ComboBox<Level> menuLevelSelector;
 
     @Override
     public void start(Stage primaryStage) {
+        this.mainStage = primaryStage;
+        setupMenuScene();
+        primaryStage.setTitle("Knight's Tour - Colorful Prototype");
+        primaryStage.setScene(menuScene);
+        primaryStage.show();
+    }
+
+    private void setupMenuScene() {
+        Label title = new Label("Knight's Tour");
+        title.setFont(Font.font("Impact", FontWeight.BOLD, 36));
+        title.setTextFill(Color.web("#06D6A0"));
+        Label selectLabel = new Label("Select Difficulty:");
+        selectLabel.setFont(Font.font("Verdana", FontWeight.BOLD, 18));
+        menuLevelSelector = new javafx.scene.control.ComboBox<>(javafx.collections.FXCollections.observableArrayList(levels));
+        menuLevelSelector.setCellFactory(lv -> new javafx.scene.control.ListCell<>() {
+            @Override protected void updateItem(Level item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.name);
+            }
+        });
+        menuLevelSelector.setButtonCell(new javafx.scene.control.ListCell<>() {
+            @Override protected void updateItem(Level item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.name);
+            }
+        });
+        menuLevelSelector.getSelectionModel().select(currentLevel);
+        Button startButton = new Button("Start Game");
+        startButton.setFont(Font.font("Verdana", FontWeight.BOLD, 18));
+        startButton.setOnAction(e -> {
+            currentLevel = menuLevelSelector.getValue();
+            setupGameScene();
+            mainStage.setScene(gameScene);
+            resetGame();
+        });
+        VBox menuBox = new VBox(20, title, selectLabel, menuLevelSelector, startButton);
+        menuBox.setAlignment(Pos.CENTER);
+        menuBox.setPadding(new Insets(40));
+        menuRoot = menuBox;
+        menuScene = new Scene(menuRoot, 700, 700);
+    }
+
+    private void setupGameScene() {
         scoreLabel = new Label("Score: 0");
         scoreLabel.setFont(Font.font("Verdana", FontWeight.BOLD, CONTROL_FONT_SIZE));
-
         moveCountLabel = new Label();
         moveCountLabel.setFont(Font.font("Verdana", FontWeight.BOLD, CONTROL_FONT_SIZE));
-
         winLabel = new Label("");
         winLabel.setFont(Font.font("Impact", FontWeight.BOLD, WIN_FONT_SIZE));
         winLabel.setStyle("-fx-text-fill: #06D6A0;");
-
         undoButton = new Button();
         undoButton.setFont(Font.font(CONTROL_FONT_SIZE));
         undoButton.setDisable(true);
         undoButton.setOnAction(e -> undoMove());
-
-        // Level selector ComboBox
-        javafx.scene.control.ComboBox<Level> levelSelector = new javafx.scene.control.ComboBox<>(javafx.collections.FXCollections.observableArrayList(levels));
-        levelSelector.setCellFactory(lv -> new javafx.scene.control.ListCell<>() {
-            @Override protected void updateItem(Level item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.name);
-            }
-        });
-        levelSelector.setButtonCell(new javafx.scene.control.ListCell<>() {
-            @Override protected void updateItem(Level item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.name);
-            }
-        });
-        levelSelector.getSelectionModel().select(currentLevel);
-        levelSelector.setOnAction(e -> {
-            currentLevel = levelSelector.getValue();
-            resetGame();
-        });
-
-        HBox controls = new HBox(10, levelSelector, scoreLabel, moveCountLabel, undoButton);
+        Button backButton = new Button("Back to Menu");
+        backButton.setFont(Font.font(CONTROL_FONT_SIZE));
+        backButton.setOnAction(e -> mainStage.setScene(menuScene));
+        HBox controls = new HBox(10, scoreLabel, moveCountLabel, undoButton, backButton);
         controls.setAlignment(Pos.CENTER);
         controls.setPadding(new Insets(5));
-
-        VBox root = new VBox(10, controls, winLabel, createBoard());
+        VBox root = new VBox(0, controls, winLabel);
         root.setAlignment(Pos.CENTER);
         root.setPadding(new Insets(10));
-
-        Scene scene = new Scene(root);
-        primaryStage.setTitle("Knight's Tour - Colorful Prototype");
-        primaryStage.setScene(scene);
-        primaryStage.show();
-        resetGame();
+        boardPane = createBoard();
+        root.getChildren().add(boardPane);
+        gameRoot = root;
+        gameScene = new Scene(gameRoot, 700, 700);
     }
 
     private GridPane createBoard() {
@@ -267,8 +295,15 @@ public class ChessBoardKnight extends Application {
         moveCountLabel.setText(String.format("Squares Visited: 0/%d", currentLevel.boardSize * currentLevel.boardSize));
         undoButton.setText("Undo (-" + currentLevel.undoPenalty + " pts)");
         undoButton.setDisable(true);
-        VBox root = (VBox) scoreLabel.getScene().getRoot();
-        root.getChildren().set(2, createBoard()); // Corrected index from 3 to 2
+        if (gameRoot != null) {
+            int boardIndex = gameRoot.getChildren().indexOf(boardPane);
+            boardPane = createBoard();
+            if (boardIndex != -1) {
+                gameRoot.getChildren().set(boardIndex, boardPane);
+            } else {
+                gameRoot.getChildren().add(boardPane);
+            }
+        }
     }
 
     public static void main(String[] args) {
