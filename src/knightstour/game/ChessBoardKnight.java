@@ -1,309 +1,642 @@
 package knightstour.game;
 
 import javafx.application.Application;
-import javafx.scene.Scene;
-import javafx.scene.control.Button;
-import javafx.scene.control.Label;
-import javafx.geometry.Pos;
+import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
-import javafx.scene.layout.GridPane;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.VBox;
-import javafx.stage.Stage;
+import javafx.geometry.Pos;
+import javafx.scene.Scene;
+import javafx.scene.canvas.Canvas;
+import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.Separator;
+import javafx.scene.control.Tooltip;
+import javafx.scene.effect.BoxBlur;
+import javafx.scene.effect.DropShadow;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.input.KeyCode;
+import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
+import javafx.scene.paint.CycleMethod;
+import javafx.scene.paint.LinearGradient;
+import javafx.scene.paint.Stop;
+import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
-import javafx.scene.paint.Color;
-import javafx.scene.layout.StackPane;
+import javafx.scene.text.TextAlignment;
+import javafx.stage.Stage;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.Stack;
-import javafx.scene.control.Menu;
-import javafx.scene.control.MenuBar;
-import javafx.scene.control.MenuItem;
 
-
-
-
+/**
+ * Knight's Tour Game (JavaFX)
+ * - Keeps existing gameplay style: click to place/move the knight, legal knight moves enforced,
+ *   scoring for new squares, penalties for revisits and undo, win when all squares are visited.
+ * - New menu UX: glass card over background image, level picker with live details, Start/Tutorial/Quit.
+ *
+ * NOTE: Place menu_background.png here for best results:
+ *   src/main/resources/images/menu_background.png
+ */
 public class ChessBoardKnight extends Application {
-    // Level selection fields
-    private Level[] levels = {
-        new Level("Easy (6x6)", 6, 10, 10, 5),
-        new Level("Classic (8x8)", 8, 10, 10, 5),
-        new Level("Hard (10x10)", 10, 15, 15, 10)
+
+    // -------------------------
+    // Levels (unchanged model)
+    // -------------------------
+    private final Level[] levels = {
+            new Level("Easy (6x6)", 6, 10, 10, 5),
+            new Level("Classic (8x8)", 8, 10, 10, 5),
+            new Level("Hard (10x10)", 10, 15, 15, 10)
     };
-    private Level currentLevel = levels[1]; // Default to Classic
+    private Level currentLevel = levels[1]; // default Classic
 
+    // -------------------------
+    // Game configuration
+    // -------------------------
     private static final int SQUARE_SIZE = 60;
-    private static final int CONTROL_FONT_SIZE = 16;
-    private static final int WIN_FONT_SIZE = 20;
+    private static final Color LIGHT_COLOR = Color.web("#E5E7EB"); // light gray
+    private static final Color DARK_COLOR  = Color.web("#9CA3AF"); // darker gray
+    private static final Color MOVE_HIGHLIGHT = Color.web("#34D399"); // green
+    private static final Color VISITED_COLOR  = Color.web("#6366F1"); // indigo
+    private static final Color START_COLOR    = Color.web("#F59E0B"); // amber
 
-    private Button[][] squares;
-    private int[][] visitCount;
-    private int knightRow = -1;
-    private int knightCol = -1;
-    private int score = 0;
+    // -------------------------
+    // UI fields
+    // -------------------------
+    private Stage mainStage;
+    private Scene menuScene;
+    private Scene gameScene;
+
+    private VBox gameRoot;         // contains controls + board
+    private GridPane boardPane;    // the board grid
+    private Button[][] squares;    // buttons per square
+
     private Label scoreLabel;
     private Label moveCountLabel;
     private Label winLabel;
     private Button undoButton;
-    private Stack<Move> moveHistory = new Stack<>();
 
-    private static final int[] ROW_MOVES = {-2, -2, -1, -1, 1, 1, 2, 2};
-    private static final int[] COL_MOVES = {-1, 1, -2, 2, -2, 2, -1, 1};
+    // Menu fields
+    private ComboBox<Level> menuLevelSelector;
+    private Label levelDetails;
 
-    private class Move {
-        int row, col, score;
-        Move(int row, int col, int score) {
-            this.row = row;
-            this.col = col;
-            this.score = score;
-        }
-    }
+    // -------------------------
+    // Game state
+    // -------------------------
+    private int score = 0;
+    private int moveCount = 0;
 
-    private GridPane boardPane;
-    private Stage mainStage;
-    private Scene menuScene;
-    private Scene gameScene;
-    private VBox menuRoot;
-    private VBox gameRoot;
-    private javafx.scene.control.ComboBox<Level> menuLevelSelector;
+    private int boardSize;               // convenience from currentLevel
+    private boolean[][] visited;         // visited squares
+    private int currentRow = -1;         // knight position
+    private int currentCol = -1;
+    private final Stack<int[]> moveStack = new Stack<>(); // history of moves
 
+    // Knight move deltas
+    private static final int[][] KNIGHT_DELTAS = {
+            {-2, -1}, {-2, 1},
+            {-1, -2}, {-1, 2},
+            {1, -2},  {1, 2},
+            {2, -1},  {2, 1}
+    };
+
+    // =========================================================
+    // App start
+    // =========================================================
     @Override
     public void start(Stage primaryStage) {
         this.mainStage = primaryStage;
-        setupMenuScene();
-        primaryStage.setTitle("Knight's Tour - Colorful Prototype");
-        primaryStage.setScene(menuScene);
-        primaryStage.show();
+        buildMenuScene(mainStage);          // new UX menu
+        setupGameScene();                   // game scene scaffold (board created on reset)
+        mainStage.setTitle("Knight's Tour");
+        mainStage.setScene(menuScene);
+        mainStage.show();
     }
 
-    private void setupMenuScene() {
-        Label title = new Label("Knight's Tour");
-        title.setFont(Font.font("Impact", FontWeight.BOLD, 36));
-        title.setTextFill(Color.web("#06D6A0"));
-        Label selectLabel = new Label("Select Difficulty:");
-        selectLabel.setFont(Font.font("Verdana", FontWeight.BOLD, 18));
-        menuLevelSelector = new javafx.scene.control.ComboBox<>(javafx.collections.FXCollections.observableArrayList(levels));
-        menuLevelSelector.setCellFactory(lv -> new javafx.scene.control.ListCell<>() {
-            @Override protected void updateItem(Level item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.name);
-            }
-        });
+    // =========================================================
+    // MENU (Redesigned UX)
+    // =========================================================
+    private void buildMenuScene(Stage stage) {
+        StackPane root = new StackPane();
+
+        // Background image
+        Image bg = loadMenuBackground();
+        ImageView bgView = new ImageView(bg);
+        bgView.setPreserveRatio(true);
+        bgView.setFitWidth(1280);
+        bgView.setFitHeight(800);
+
+        // Gradient overlay to improve text contrast
+        Rectangle gradient = new Rectangle();
+        gradient.widthProperty().bind(root.widthProperty());
+        gradient.heightProperty().bind(root.heightProperty());
+        gradient.setFill(new LinearGradient(
+                0, 0, 0, 1, true, CycleMethod.NO_CYCLE,
+                new Stop(0.0, Color.color(0,0,0,0.25)),
+                new Stop(0.6, Color.color(0,0,0,0.45)),
+                new Stop(1.0, Color.color(0,0,0,0.55))
+        ));
+
+        // Glass card container
+        VBox card = new VBox(16);
+        card.setMaxWidth(520);
+        card.setMinWidth(360);
+        card.setPadding(new Insets(28));
+        card.setAlignment(Pos.CENTER);
+
+        Rectangle glass = new Rectangle();
+        glass.setArcWidth(28);
+        glass.setArcHeight(28);
+        glass.widthProperty().bind(card.widthProperty().add(32));
+        glass.heightProperty().bind(card.heightProperty().add(32));
+        glass.setFill(Color.rgb(255,255,255,0.12));
+        glass.setStroke(Color.rgb(255,255,255,0.24));
+        glass.setEffect(new BoxBlur(12, 12, 3));
+
+        DropShadow shadow = new DropShadow();
+        shadow.setRadius(24);
+        shadow.setSpread(0.06);
+        shadow.setColor(Color.rgb(0,0,0,0.45));
+
+        StackPane cardHolder = new StackPane(glass, card);
+        cardHolder.setEffect(shadow);
+        cardHolder.setPickOnBounds(false);
+
+        // Title & subtitle
+        Label title = new Label("Knight’s Tour");
+        // If "Cinzel" isn't packaged, JavaFX will fall back automatically.
+        title.setFont(Font.font("Cinzel", FontWeight.EXTRA_BOLD, 42));
+        title.setTextFill(Color.WHITE);
+        title.setTextAlignment(TextAlignment.CENTER);
+
+        Label subtitle = new Label("Visit every square exactly once with the lone knight.");
+        subtitle.setFont(Font.font("Verdana", 14));
+        subtitle.setTextFill(Color.rgb(255,255,255, 0.92));
+        subtitle.setWrapText(true);
+        subtitle.setTextAlignment(TextAlignment.CENTER);
+
+        Region spacer1 = new Region();
+        spacer1.setMinHeight(8);
+
+        // Level selection
+        Label selectLabel = new Label("Choose difficulty");
+        selectLabel.setFont(Font.font("Verdana", FontWeight.BOLD, 14));
+        selectLabel.setTextFill(Color.web("#E5E7EB"));
+
+        menuLevelSelector = new ComboBox<>(FXCollections.observableArrayList(levels));
+        menuLevelSelector.setMaxWidth(Double.MAX_VALUE);
         menuLevelSelector.setButtonCell(new javafx.scene.control.ListCell<>() {
             @Override protected void updateItem(Level item, boolean empty) {
                 super.updateItem(item, empty);
                 setText(empty || item == null ? null : item.name);
             }
         });
-        menuLevelSelector.getSelectionModel().select(currentLevel);
-        Button startButton = new Button("Start Game");
-        startButton.setFont(Font.font("Verdana", FontWeight.BOLD, 18));
-        startButton.setOnAction(e -> {
-            currentLevel = menuLevelSelector.getValue();
-            setupGameScene();
-            mainStage.setScene(gameScene);
-            resetGame();
+        menuLevelSelector.setCellFactory(lv -> new javafx.scene.control.ListCell<>() {
+            @Override protected void updateItem(Level item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.name);
+            }
         });
-        VBox menuBox = new VBox(20, title, selectLabel, menuLevelSelector, startButton);
-        menuBox.setAlignment(Pos.CENTER);
-        menuBox.setPadding(new Insets(40));
-        menuRoot = menuBox;
-        menuScene = new Scene(menuRoot, 700, 700);
+        menuLevelSelector.getSelectionModel().select(currentLevel);
+
+        Tooltip.install(menuLevelSelector, new Tooltip(
+                "Pick a board size and scoring rules. You can change this before starting."
+        ));
+
+        levelDetails = new Label();
+        levelDetails.setFont(Font.font("Verdana", 12));
+        levelDetails.setTextFill(Color.web("#F3F4F6"));
+        levelDetails.setWrapText(true);
+        levelDetails.setTextAlignment(TextAlignment.CENTER);
+        levelDetails.setStyle("-fx-opacity: 0.92;");
+        updateLevelDetails(menuLevelSelector.getValue());
+        menuLevelSelector.valueProperty().addListener((obs, oldV, newV) -> updateLevelDetails(newV));
+
+        Separator sep = new Separator();
+        sep.setOpacity(0.65);
+
+        // Buttons
+        Button startBtn = primaryButton("Start Game");
+        startBtn.setOnAction(e -> {
+            Level sel = menuLevelSelector.getValue();
+            if (sel != null) currentLevel = sel;
+            resetGame();
+            mainStage.setScene(gameScene);
+        });
+        Tooltip.install(startBtn, new Tooltip("Begin the tour on the selected board."));
+
+        Button tutorialBtn = secondaryButton("Tutorial");
+        tutorialBtn.setOnAction(e -> showTutorialDialog());
+        Tooltip.install(tutorialBtn, new Tooltip("See how the knight moves and the goal."));
+
+        Button quitBtn = ghostButton("Quit");
+        quitBtn.setOnAction(e -> mainStage.close());
+
+        HBox buttons = new HBox(12, startBtn, tutorialBtn, quitBtn);
+        buttons.setAlignment(Pos.CENTER);
+
+        // Keyboard shortcuts
+        card.setOnKeyPressed(ke -> {
+            if (ke.getCode() == KeyCode.ENTER) startBtn.fire();
+            if (ke.getCode() == KeyCode.ESCAPE) quitBtn.fire();
+        });
+
+        // Assemble
+        card.getChildren().setAll(
+                title, subtitle, spacer1,
+                selectLabel, menuLevelSelector, levelDetails, sep, buttons
+        );
+
+        root.getChildren().addAll(bgView, gradient, cardHolder);
+        StackPane.setAlignment(cardHolder, Pos.CENTER);
+
+        menuScene = new Scene(root, 960, 600);
+        // Keep background fitting viewport
+        menuScene.widthProperty().addListener((o, a, b) -> bgView.setFitWidth(b.doubleValue()));
+        menuScene.heightProperty().addListener((o, a, b) -> bgView.setFitHeight(b.doubleValue()));
+
+        // Focus to card so Enter/Esc work immediately
+        menuScene.windowProperty().addListener((obs, oldWin, newWin) -> {
+            if (newWin != null) {
+                newWin.focusedProperty().addListener((o2, was, is) -> {
+                    if (is) card.requestFocus();
+                });
+            }
+        });
     }
 
+    private Image loadMenuBackground() {
+        // First try classpath (recommended)
+        String[] paths = new String[]{
+                "/resources/images/menu_background.png",
+                "/images/menu_background.png",
+                "/menu_background.png"
+        };
+        for (String p : paths) {
+            try {
+                var url = getClass().getResource(p);
+                if (url != null) return new Image(url.toExternalForm());
+            } catch (Exception ignored) { }
+        }
+        // Dev fallback (your uploaded path)
+        try {
+            java.io.File f = new java.io.File("/mnt/data/menu_background.png");
+            if (f.exists()) return new Image(f.toURI().toString());
+        } catch (Exception ignored) { }
+
+        // Solid color fallback
+        Canvas c = new Canvas(64, 64);
+        GraphicsContext g = c.getGraphicsContext2D();
+        g.setFill(Color.web("#0f172a"));
+        g.fillRect(0,0,64,64);
+        return c.snapshot(null, null);
+    }
+
+    private void updateLevelDetails(Level lvl) {
+        if (lvl == null) { levelDetails.setText(""); return; }
+        String txt = String.format(
+                "Board: %dx%d • Points/Move: %d • Revisit Penalty: -%d • Undo Penalty: -%d",
+                lvl.boardSize, lvl.boardSize, lvl.pointsPerMove, lvl.revisitPenalty, lvl.undoPenalty
+        );
+        levelDetails.setText(txt);
+    }
+
+    private Button primaryButton(String text) {
+        Button b = new Button(text);
+        b.setFont(Font.font("Verdana", FontWeight.BOLD, 16));
+        b.setMinWidth(140);
+        b.setStyle(
+                "-fx-background-color: linear-gradient(#22c55e, #16a34a);"+
+                        "-fx-text-fill: white; -fx-background-radius: 12; -fx-padding: 12 18 12 18;"
+        );
+        b.setOnMouseEntered(e -> b.setStyle(
+                "-fx-background-color: linear-gradient(#34d399, #16a34a);"+
+                        "-fx-text-fill: white; -fx-background-radius: 12; -fx-padding: 12 18 12 18;"
+        ));
+        b.setOnMouseExited(e -> b.setStyle(
+                "-fx-background-color: linear-gradient(#22c55e, #16a34a);"+
+                        "-fx-text-fill: white; -fx-background-radius: 12; -fx-padding: 12 18 12 18;"
+        ));
+        return b;
+    }
+
+    private Button secondaryButton(String text) {
+        Button b = new Button(text);
+        b.setFont(Font.font("Verdana", FontWeight.SEMI_BOLD, 15));
+        b.setMinWidth(120);
+        b.setStyle(
+                "-fx-background-color: rgba(255,255,255,0.18); -fx-text-fill: #F3F4F6;"+
+                        "-fx-background-radius: 12; -fx-padding: 10 16 10 16;"+
+                        "-fx-border-color: rgba(255,255,255,0.35); -fx-border-radius: 12;"
+        );
+        b.setOnMouseEntered(e -> b.setStyle(
+                "-fx-background-color: rgba(255,255,255,0.25); -fx-text-fill: white;"+
+                        "-fx-background-radius: 12; -fx-padding: 10 16 10 16;"+
+                        "-fx-border-color: rgba(255,255,255,0.55); -fx-border-radius: 12;"
+        ));
+        b.setOnMouseExited(e -> b.setStyle(
+                "-fx-background-color: rgba(255,255,255,0.18); -fx-text-fill: #F3F4F6;"+
+                        "-fx-background-radius: 12; -fx-padding: 10 16 10 16;"+
+                        "-fx-border-color: rgba(255,255,255,0.35); -fx-border-radius: 12;"
+        ));
+        return b;
+    }
+
+    private Button ghostButton(String text) {
+        Button b = new Button(text);
+        b.setFont(Font.font("Verdana", 14));
+        b.setMinWidth(90);
+        b.setStyle("-fx-background-color: transparent; -fx-text-fill: #E5E7EB; -fx-padding: 8 12 8 12;");
+        b.setOnMouseEntered(e -> b.setStyle("-fx-background-color: rgba(255,255,255,0.08); -fx-text-fill: white; -fx-padding: 8 12 8 12; -fx-background-radius: 10;"));
+        b.setOnMouseExited(e -> b.setStyle("-fx-background-color: transparent; -fx-text-fill: #E5E7EB; -fx-padding: 8 12 8 12;"));
+        return b;
+    }
+
+    private void showTutorialDialog() {
+        Alert a = new Alert(Alert.AlertType.INFORMATION);
+        a.setTitle("Knight’s Tour Tutorial");
+        a.setHeaderText("How the Knight Moves");
+        a.setContentText(
+                "• The knight moves in an L-shape: 2 in one direction, 1 perpendicular.\n" +
+                        "• Visit each square exactly once.\n" +
+                        "• Score: +" + currentLevel.pointsPerMove + " new square, " +
+                        "-" + currentLevel.revisitPenalty + " revisit, " +
+                        "-" + currentLevel.undoPenalty + " per undo.\n\n" +
+                        "Tip: Look ahead for dead ends. Corner traps are common!"
+        );
+        a.showAndWait();
+    }
+
+    // =========================================================
+    // GAME SCENE / BOARD / LOGIC  (kept aligned with your original)
+    // =========================================================
     private void setupGameScene() {
-        scoreLabel = new Label("Score: 0");
-        scoreLabel.setFont(Font.font("Verdana", FontWeight.BOLD, CONTROL_FONT_SIZE));
+        scoreLabel = new Label();
+        scoreLabel.setFont(Font.font("Verdana", FontWeight.BOLD, 16));
         moveCountLabel = new Label();
-        moveCountLabel.setFont(Font.font("Verdana", FontWeight.BOLD, CONTROL_FONT_SIZE));
+        moveCountLabel.setFont(Font.font("Verdana", FontWeight.BOLD, 16));
         winLabel = new Label("");
-        winLabel.setFont(Font.font("Impact", FontWeight.BOLD, WIN_FONT_SIZE));
+        winLabel.setFont(Font.font("Impact", FontWeight.BOLD, 28));
         winLabel.setStyle("-fx-text-fill: #06D6A0;");
-        undoButton = new Button();
-        undoButton.setFont(Font.font(CONTROL_FONT_SIZE));
+
+        undoButton = new Button("Undo");
+        undoButton.setFont(Font.font(16));
         undoButton.setDisable(true);
         undoButton.setOnAction(e -> undoMove());
+
         Button backButton = new Button("Back to Menu");
-        backButton.setFont(Font.font(CONTROL_FONT_SIZE));
+        backButton.setFont(Font.font(16));
         backButton.setOnAction(e -> mainStage.setScene(menuScene));
-        HBox controls = new HBox(10, scoreLabel, moveCountLabel, undoButton, backButton);
+
+        HBox controls = new HBox(12, scoreLabel, moveCountLabel, undoButton, backButton);
         controls.setAlignment(Pos.CENTER);
-        controls.setPadding(new Insets(5));
-        VBox root = new VBox(0, controls, winLabel);
+        controls.setPadding(new Insets(8));
+
+        VBox root = new VBox(8, controls, winLabel);
         root.setAlignment(Pos.CENTER);
         root.setPadding(new Insets(10));
+
         boardPane = createBoard();
         root.getChildren().add(boardPane);
+
         gameRoot = root;
-        gameScene = new Scene(gameRoot, 700, 700);
+        gameScene = new Scene(gameRoot, 700, 720);
     }
 
     private GridPane createBoard() {
+        boardSize = currentLevel.boardSize;
         GridPane board = new GridPane();
-        squares = new Button[currentLevel.boardSize][currentLevel.boardSize];
-        for (int row = 0; row < currentLevel.boardSize; row++) {
-            for (int col = 0; col < currentLevel.boardSize; col++) {
-                Button square = createSquare(row, col);
-                squares[row][col] = square;
-                board.add(square, col, row);
+        board.setHgap(0);
+        board.setVgap(0);
+        board.setAlignment(Pos.CENTER);
+
+        squares = new Button[boardSize][boardSize];
+        for (int r = 0; r < boardSize; r++) {
+            for (int c = 0; c < boardSize; c++) {
+                Button square = createSquare(r, c);
+                squares[r][c] = square;
+                board.add(square, c, r);
             }
         }
         return board;
     }
 
     private Button createSquare(int row, int col) {
-        Button square = new Button();
-        square.setPrefSize(SQUARE_SIZE, SQUARE_SIZE);
-        square.setStyle(getSquareStyle(row, col, false));
-        square.setOnAction(e -> handleSquareClick(row, col));
-        return square;
-    }
+        Button b = new Button();
+        b.setMinSize(SQUARE_SIZE, SQUARE_SIZE);
+        b.setMaxSize(SQUARE_SIZE, SQUARE_SIZE);
+        b.setFocusTraversable(false);
 
-    private String getSquareStyle(int row, int col, boolean highlight) {
-        String lightColor = "#bfcf8f"; // new light green
-        String darkColor = "#769656"; // new dark green
-        String baseColor = (row + col) % 2 == 0 ? lightColor : darkColor;
-        String border = highlight ? "-fx-border-color: #FFD166; -fx-border-width: 3px;" : "";
-        return "-fx-background-color: " + baseColor + "; -fx-background-radius: 8px; " + border;
+        boolean light = ((row + col) % 2 == 0);
+        b.setStyle("-fx-background-color: " + (light ? toRgb(LIGHT_COLOR) : toRgb(DARK_COLOR)) + ";"
+                + "-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 14px;");
+
+        b.setOnAction(e -> handleSquareClick(row, col));
+        return b;
     }
 
     private void handleSquareClick(int row, int col) {
-        if (knightRow == -1) {
-            placeKnight(row, col);
-            updateVisitCount(row, col);
-            moveHistory.push(new Move(row, col, score));
-            undoButton.setDisable(false);
+        // First click sets starting position
+        if (currentRow == -1 && currentCol == -1) {
+            placeKnight(row, col, true);
             return;
         }
-        if (isLegalMove(row, col)) {
-            if (visitCount[row][col] == 0) score += currentLevel.pointsPerMove;
-            else score -= currentLevel.revisitPenalty;
-            scoreLabel.setText("Score: " + score);
-            placeKnight(row, col);
-            updateVisitCount(row, col);
-            moveHistory.push(new Move(row, col, score));
-            undoButton.setDisable(false);
+        // Only legal knight moves allowed from current position
+        if (!isLegalKnightMove(currentRow, currentCol, row, col)) return;
+
+        boolean isRevisit = visited[row][col];
+        placeKnight(row, col, !isRevisit);
+
+        // scoring
+        if (isRevisit) {
+            score -= currentLevel.revisitPenalty;
+        } else {
+            score += currentLevel.pointsPerMove;
+        }
+
+        // win?
+        if (visitedCount() == boardSize * boardSize) {
+            winLabel.setText("Tour Complete! 🎉");
+        }
+
+        updateUIStatus();
+    }
+
+    private void placeKnight(int row, int col, boolean markVisited) {
+        // Clear previous marker text styling
+        if (currentRow >= 0 && currentCol >= 0) {
+            Button prev = squares[currentRow][currentCol];
+            prev.setText(visited[currentRow][currentCol] ? "•" : "");
+            prev.setStyle(prev.getStyle()); // keep bg
+        }
+
+        currentRow = row;
+        currentCol = col;
+
+        if (visited == null) visited = new boolean[boardSize][boardSize];
+        if (markVisited) visited[row][col] = true;
+
+        Button here = squares[row][col];
+        here.setText("♞");
+        here.setStyle(here.getStyle() + "; -fx-text-fill: #111827; -fx-font-size: 18px; -fx-font-weight: bold;");
+
+        moveStack.push(new int[]{row, col});
+        moveCount++;
+
+        // Update coloring to hint legal moves
+        refreshHighlights();
+    }
+
+    private void refreshHighlights() {
+        // Reset all square backgrounds to base board colors + visited tint
+        for (int r = 0; r < boardSize; r++) {
+            for (int c = 0; c < boardSize; c++) {
+                boolean light = ((r + c) % 2 == 0);
+                String base = "-fx-background-color: " + (light ? toRgb(LIGHT_COLOR) : toRgb(DARK_COLOR)) + ";";
+                if (visited != null && visited[r][c]) {
+                    base += " -fx-background-insets: 0; -fx-background-radius: 0; -fx-border-color: rgba(0,0,0,0.18);";
+                    base += " -fx-effect: null;";
+                }
+                squares[r][c].setStyle(base);
+                if (visited != null && visited[r][c] && !(r == currentRow && c == currentCol)) {
+                    squares[r][c].setText("•");
+                    squares[r][c].setTextFill(Color.WHITE);
+                } else if (!(r == currentRow && c == currentCol)) {
+                    squares[r][c].setText("");
+                }
+            }
+        }
+        // Highlight legal next moves
+        if (currentRow >= 0 && currentCol >= 0) {
+            for (int[] d : KNIGHT_DELTAS) {
+                int nr = currentRow + d[0];
+                int nc = currentCol + d[1];
+                if (inBounds(nr, nc)) {
+                    Button b = squares[nr][nc];
+                    b.setStyle(b.getStyle() + " -fx-background-color: " + toRgb(MOVE_HIGHLIGHT) + ";");
+                }
+            }
+            // Mark start square distinctly
+            squares[currentRow][currentCol].setStyle(squares[currentRow][currentCol].getStyle()
+                    + " -fx-background-color: " + toRgb(START_COLOR) + ";");
         }
     }
 
-    private void updateVisitCount(int row, int col) {
-        visitCount[row][col]++;
-        squares[row][col].setGraphic(createKnightLabel(visitCount[row][col]));
-        int unique = countUniqueVisits();
-        moveCountLabel.setText(String.format("Squares Visited: %d/%d", unique, currentLevel.boardSize * currentLevel.boardSize));
-        if (unique == currentLevel.boardSize * currentLevel.boardSize) {
-            winLabel.setText("Congratulations! You won!");
-            undoButton.setDisable(true);
-        }
+    private boolean isLegalKnightMove(int r1, int c1, int r2, int c2) {
+        int dr = Math.abs(r1 - r2);
+        int dc = Math.abs(c1 - c2);
+        return (dr == 2 && dc == 1) || (dr == 1 && dc == 2);
     }
 
-    private Label createKnightLabel(int visitNumber) {
-        Label label = new Label("\u2658\n" + visitNumber);
-        label.setFont(Font.font("Segoe UI Symbol", 36));
-        label.setTextFill(Color.web("#EF476F"));
-        label.setAlignment(Pos.CENTER);
-        return label;
+    private boolean inBounds(int r, int c) {
+        return r >= 0 && r < boardSize && c >= 0 && c < boardSize;
     }
 
-    private int countUniqueVisits() {
-        int count = 0;
-        for (int[] rows : visitCount) {
-            for (int val : rows) if (val > 0) count++;
-        }
-        return count;
-    }
-
-    private void placeKnight(int row, int col) {
-        if (knightRow != -1) {
-            squares[knightRow][knightCol].setGraphic(
-                    visitCount[knightRow][knightCol] > 0 ? createVisitLabel(visitCount[knightRow][knightCol]) : null
-            );
-        }
-        knightRow = row;
-        knightCol = col;
-        clearHighlights();
-        highlightLegalMoves();
-        squares[knightRow][knightCol].setGraphic(createKnightLabel(visitCount[knightRow][knightCol]));
-    }
-
-    private Label createVisitLabel(int number) {
-        Label label = new Label(String.valueOf(number));
-        label.setFont(Font.font(18));
-        label.setTextFill(Color.WHITE);
-        return label;
+    private int visitedCount() {
+        int n = 0;
+        if (visited == null) return 0;
+        for (int r = 0; r < boardSize; r++)
+            for (int c = 0; c < boardSize; c++)
+                if (visited[r][c]) n++;
+        return n;
     }
 
     private void undoMove() {
-        if (moveHistory.isEmpty()) return;
-        Move lastMove = moveHistory.pop();
-        visitCount[knightRow][knightCol]--;
-        score -= currentLevel.undoPenalty;
-        if (moveHistory.isEmpty()) {
-            knightRow = -1;
-            knightCol = -1;
-            squares[lastMove.row][lastMove.col].setGraphic(null);
-            undoButton.setDisable(true);
+        if (moveStack.isEmpty()) return;
+
+        // Remove current
+        int[] last = moveStack.pop();
+        int lr = last[0], lc = last[1];
+        // If the square had been marked visited only by this move, revert visitation.
+        // For simplicity, keep it visited if visited earlier; we recompute visited from stack.
+        recomputeVisitedFromStack();
+
+        // Reposition knight to previous spot (if any)
+        if (!moveStack.isEmpty()) {
+            int[] prev = moveStack.peek();
+            currentRow = prev[0];
+            currentCol = prev[1];
         } else {
-            Move prev = moveHistory.peek();
-            knightRow = prev.row;
-            knightCol = prev.col;
-            squares[lastMove.row][lastMove.col].setGraphic(
-                    visitCount[lastMove.row][lastMove.col] > 0 ? createVisitLabel(visitCount[lastMove.row][lastMove.col]) : null
-            );
-            squares[knightRow][knightCol].setGraphic(createKnightLabel(visitCount[knightRow][knightCol]));
+            currentRow = -1;
+            currentCol = -1;
+            winLabel.setText("");
         }
-        scoreLabel.setText("Score: " + score);
-        moveCountLabel.setText(String.format("Squares Visited: %d/%d", countUniqueVisits(), currentLevel.boardSize * currentLevel.boardSize));
-        winLabel.setText("");
-        clearHighlights();
-        highlightLegalMoves();
+
+        moveCount = Math.max(0, moveCount - 1);
+        score -= currentLevel.undoPenalty;
+
+        refreshBoardAfterUndo();
+        updateUIStatus();
     }
 
-    private boolean isLegalMove(int row, int col) {
-        for (int i = 0; i < 8; i++)
-            if (knightRow + ROW_MOVES[i] == row && knightCol + COL_MOVES[i] == col) return true;
-        return false;
+    private void recomputeVisitedFromStack() {
+        visited = new boolean[boardSize][boardSize];
+        for (int[] m : moveStack) visited[m[0]][m[1]] = true;
     }
 
-    private void highlightLegalMoves() {
-        for (int i = 0; i < 8; i++) {
-            int newRow = knightRow + ROW_MOVES[i];
-            int newCol = knightCol + COL_MOVES[i];
-            if (isValidPosition(newRow, newCol)) {
-                squares[newRow][newCol].setStyle(getSquareStyle(newRow, newCol, true));
+    private void refreshBoardAfterUndo() {
+        // Redraw all squares text markers and highlights
+        for (int r = 0; r < boardSize; r++) {
+            for (int c = 0; c < boardSize; c++) {
+                Button b = squares[r][c];
+                boolean light = ((r + c) % 2 == 0);
+                b.setStyle("-fx-background-color: " + (light ? toRgb(LIGHT_COLOR) : toRgb(DARK_COLOR)) + ";"
+                        + "-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 14px;");
+                if (visited[r][c]) {
+                    b.setText("•");
+                } else {
+                    b.setText("");
+                }
             }
         }
+        if (currentRow >= 0 && currentCol >= 0) {
+            squares[currentRow][currentCol].setText("♞");
+            squares[currentRow][currentCol].setStyle(squares[currentRow][currentCol].getStyle()
+                    + " -fx-background-color: " + toRgb(START_COLOR) + "; -fx-text-fill: #111827; -fx-font-size: 18px; -fx-font-weight: bold;");
+        }
+        refreshHighlights();
     }
 
-    private boolean isValidPosition(int row, int col) {
-        return row >= 0 && row < currentLevel.boardSize && col >= 0 && col < currentLevel.boardSize;
-    }
-
-    private void clearHighlights() {
-        for (int row = 0; row < currentLevel.boardSize; row++)
-            for (int col = 0; col < currentLevel.boardSize; col++)
-                squares[row][col].setStyle(getSquareStyle(row, col, false));
+    private void updateUIStatus() {
+        scoreLabel.setText("Score: " + score);
+        moveCountLabel.setText("Moves: " + moveCount);
+        undoButton.setDisable(moveStack.isEmpty());
     }
 
     private void resetGame() {
-        knightRow = -1;
-        knightCol = -1;
         score = 0;
-        moveHistory.clear();
-        visitCount = new int[currentLevel.boardSize][currentLevel.boardSize];
+        moveCount = 0;
+        currentRow = -1;
+        currentCol = -1;
+        moveStack.clear();
+        boardSize = currentLevel.boardSize;
+        visited = new boolean[boardSize][boardSize];
         winLabel.setText("");
-        scoreLabel.setText("Score: 0");
-        moveCountLabel.setText(String.format("Squares Visited: 0/%d", currentLevel.boardSize * currentLevel.boardSize));
-        undoButton.setText("Undo (-" + currentLevel.undoPenalty + " pts)");
-        undoButton.setDisable(true);
+        updateUIStatus();
+
         if (gameRoot != null) {
-            int boardIndex = gameRoot.getChildren().indexOf(boardPane);
-            boardPane = createBoard();
-            if (boardIndex != -1) {
-                gameRoot.getChildren().set(boardIndex, boardPane);
-            } else {
-                gameRoot.getChildren().add(boardPane);
+            if (boardPane != null) {
+                gameRoot.getChildren().remove(boardPane);
             }
+            boardPane = createBoard();
+            gameRoot.getChildren().add(boardPane);
         }
+    }
+
+    // =========================================================
+    // Helpers
+    // =========================================================
+    private static String toRgb(Color c) {
+        int r = (int)Math.round(c.getRed() * 255.0);
+        int g = (int)Math.round(c.getGreen() * 255.0);
+        int b = (int)Math.round(c.getBlue() * 255.0);
+        return String.format("rgb(%d,%d,%d)", r, g, b);
     }
 
     public static void main(String[] args) {
