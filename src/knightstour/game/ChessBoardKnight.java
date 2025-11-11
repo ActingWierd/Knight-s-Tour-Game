@@ -29,20 +29,20 @@ import javafx.scene.text.FontWeight;
 import javafx.scene.text.TextAlignment;
 import javafx.stage.Stage;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
 import java.util.Stack;
 
 /**
  * Knight's Tour Game (JavaFX)
- * - Keeps existing gameplay style: click to place/move the knight, legal knight moves enforced,
- *   scoring for new squares, penalties for revisits and undo, win when all squares are visited.
- * - New menu UX: glass card over background image, level picker with live details, Start/Tutorial/Quit.
+ * - Keeps existing gameplay style.
+ * - New menu UX (glass card).
+ * - NEW: Knights pattern wraps around the board when Level is Classic 8x8.
  *
- * NOTE: Place menu_background.png here for best results:
+ * Place images here (recommended):
  *   src/main/resources/images/menu_background.png
+ *   src/main/resources/images/knights_pattern.png
+ *
+ * Your absolute Windows path is also supported for the pattern:
+ *   C:\Users\ianrh\IdeaProjects\Knights_Tour_Game\src\resources\images\knights_pattern.png
  */
 public class ChessBoardKnight extends Application {
 
@@ -63,7 +63,6 @@ public class ChessBoardKnight extends Application {
     private static final Color LIGHT_COLOR = Color.web("#E5E7EB"); // light gray
     private static final Color DARK_COLOR  = Color.web("#9CA3AF"); // darker gray
     private static final Color MOVE_HIGHLIGHT = Color.web("#34D399"); // green
-    private static final Color VISITED_COLOR  = Color.web("#6366F1"); // indigo
     private static final Color START_COLOR    = Color.web("#F59E0B"); // amber
 
     // -------------------------
@@ -75,6 +74,8 @@ public class ChessBoardKnight extends Application {
 
     private VBox gameRoot;         // contains controls + board
     private GridPane boardPane;    // the board grid
+    private StackPane boardFrame;  // NEW: wrapper for the board (lets us style a card over the pattern)
+
     private Button[][] squares;    // buttons per square
 
     private Label scoreLabel;
@@ -112,8 +113,11 @@ public class ChessBoardKnight extends Application {
     @Override
     public void start(Stage primaryStage) {
         this.mainStage = primaryStage;
-        buildMenuScene(mainStage);          // new UX menu
+        buildMenuScene(mainStage);          // redesigned menu
         setupGameScene();                   // game scene scaffold (board created on reset)
+        // Apply background based on default level
+        applyPatternBackground(currentLevel.boardSize == 8);
+
         mainStage.setTitle("Knight's Tour");
         mainStage.setScene(menuScene);
         mainStage.show();
@@ -170,8 +174,7 @@ public class ChessBoardKnight extends Application {
 
         // Title & subtitle
         Label title = new Label("Knight’s Tour");
-        // If "Cinzel" isn't packaged, JavaFX will fall back automatically.
-        title.setFont(Font.font("Cinzel", FontWeight.EXTRA_BOLD, 42));
+        title.setFont(Font.font("Cinzel", FontWeight.EXTRA_BOLD, 42)); // falls back if not present
         title.setTextFill(Color.WHITE);
         title.setTextAlignment(TextAlignment.CENTER);
 
@@ -374,7 +377,7 @@ public class ChessBoardKnight extends Application {
     }
 
     // =========================================================
-    // GAME SCENE / BOARD / LOGIC  (kept aligned with your original)
+    // GAME SCENE / BOARD / LOGIC
     // =========================================================
     private void setupGameScene() {
         scoreLabel = new Label();
@@ -398,12 +401,14 @@ public class ChessBoardKnight extends Application {
         controls.setAlignment(Pos.CENTER);
         controls.setPadding(new Insets(8));
 
-        VBox root = new VBox(8, controls, winLabel);
+        // Build board first so we can wrap it in a frame
+        boardPane = createBoard();
+        boardFrame = new StackPane(boardPane); // NEW
+        boardFrame.setPickOnBounds(false);
+
+        VBox root = new VBox(8, controls, winLabel, boardFrame);
         root.setAlignment(Pos.CENTER);
         root.setPadding(new Insets(10));
-
-        boardPane = createBoard();
-        root.getChildren().add(boardPane);
 
         gameRoot = root;
         gameScene = new Scene(gameRoot, 700, 720);
@@ -522,7 +527,7 @@ public class ChessBoardKnight extends Application {
                     b.setStyle(b.getStyle() + " -fx-background-color: " + toRgb(MOVE_HIGHLIGHT) + ";");
                 }
             }
-            // Mark start square distinctly
+            // Mark current square distinctly
             squares[currentRow][currentCol].setStyle(squares[currentRow][currentCol].getStyle()
                     + " -fx-background-color: " + toRgb(START_COLOR) + ";");
         }
@@ -551,10 +556,9 @@ public class ChessBoardKnight extends Application {
         if (moveStack.isEmpty()) return;
 
         // Remove current
-        int[] last = moveStack.pop();
-        int lr = last[0], lc = last[1];
-        // If the square had been marked visited only by this move, revert visitation.
-        // For simplicity, keep it visited if visited earlier; we recompute visited from stack.
+        moveStack.pop();
+
+        // Recompute visited from history
         recomputeVisitedFromStack();
 
         // Reposition knight to previous spot (if any)
@@ -621,11 +625,81 @@ public class ChessBoardKnight extends Application {
         updateUIStatus();
 
         if (gameRoot != null) {
-            if (boardPane != null) {
-                gameRoot.getChildren().remove(boardPane);
+            if (boardFrame != null) {
+                gameRoot.getChildren().remove(boardFrame);
             }
             boardPane = createBoard();
-            gameRoot.getChildren().add(boardPane);
+            boardFrame = new StackPane(boardPane); // rebuild frame
+            boardFrame.setPickOnBounds(false);
+            gameRoot.getChildren().add(boardFrame);
+        }
+
+        // Apply pattern only in Classic 8x8
+        applyPatternBackground(currentLevel != null && currentLevel.boardSize == 8);
+    }
+
+    // =========================================================
+    // Background pattern helpers (NEW)
+    // =========================================================
+
+    private Image loadKnightPattern() {
+        // Try classpath first
+        String[] paths = new String[]{
+                "/resources/images/knights_pattern.png",
+                "/images/knights_pattern.png",
+                "/knights_pattern.png"
+        };
+        for (String p : paths) {
+            try {
+                var url = getClass().getResource(p);
+                if (url != null) return new Image(url.toExternalForm());
+            } catch (Exception ignored) {}
+        }
+        // Absolute Windows path you provided
+        try {
+            java.io.File f1 = new java.io.File("C:\\Users\\ianrh\\IdeaProjects\\Knights_Tour_Game\\src\\resources\\images\\knights_pattern.png");
+            if (f1.exists()) return new Image(f1.toURI().toString());
+        } catch (Exception ignored) {}
+
+        // Dev container fallback
+        try {
+            java.io.File f2 = new java.io.File("/mnt/data/knights_pattern.png");
+            if (f2.exists()) return new Image(f2.toURI().toString());
+        } catch (Exception ignored) {}
+
+        return null;
+    }
+
+    /** Turn the tiled pattern on/off behind the board (with a soft card under the grid). */
+    private void applyPatternBackground(boolean enable) {
+        if (!enable) {
+            gameRoot.setBackground(Background.EMPTY);
+            if (boardFrame != null) boardFrame.setStyle("");
+            gameRoot.setPadding(new Insets(8));
+            return;
+        }
+        Image pat = loadKnightPattern();
+        if (pat == null) return;
+
+        BackgroundImage bi = new BackgroundImage(
+                pat,
+                BackgroundRepeat.REPEAT, BackgroundRepeat.REPEAT,
+                BackgroundPosition.CENTER,
+                new BackgroundSize(BackgroundSize.AUTO, BackgroundSize.AUTO, true, true, false, false)
+        );
+        gameRoot.setBackground(new Background(bi));
+
+        // Give space so pattern wraps around the board neatly
+        gameRoot.setPadding(new Insets(24));
+
+        // Soft white "card" so the pattern doesn't visually clash with the grid
+        if (boardFrame != null) {
+            boardFrame.setStyle(
+                    "-fx-background-color: rgba(255,255,255,0.85);" +
+                            "-fx-background-radius: 12;" +
+                            "-fx-padding: 12;" +
+                            "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.25), 18, 0.15, 0, 4);"
+            );
         }
     }
 
