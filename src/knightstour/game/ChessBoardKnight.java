@@ -60,6 +60,7 @@ public class ChessBoardKnight extends Application {
     // Game configuration
     // -------------------------
     private static final int SQUARE_SIZE = 60;
+    private static final int KNIGHT_ICON_SIZE = 50; // Font size for knight piece
     private static final Color LIGHT_COLOR = Color.web("#E5E7EB"); // light gray
     private static final Color DARK_COLOR  = Color.web("#9CA3AF"); // darker gray
     private static final Color MOVE_HIGHLIGHT = Color.web("#34D399"); // green
@@ -87,6 +88,12 @@ public class ChessBoardKnight extends Application {
     private ComboBox<Level> menuLevelSelector;
     private Label levelDetails;
 
+    // High score management
+    private HighScoreManager highScoreManager;
+
+    // Sound effects
+    private SoundManager soundManager;
+
     // -------------------------
     // Game state
     // -------------------------
@@ -113,10 +120,12 @@ public class ChessBoardKnight extends Application {
     @Override
     public void start(Stage primaryStage) {
         this.mainStage = primaryStage;
+        this.highScoreManager = new HighScoreManager();
+        this.soundManager = new SoundManager();
         buildMenuScene(mainStage);          // redesigned menu
         setupGameScene();                   // game scene scaffold (board created on reset)
         // Apply background based on default level
-        applyPatternBackground(currentLevel.boardSize == 8);
+        applyPatternBackground(currentLevel.boardSize);
 
         mainStage.setTitle("Knight's Tour");
         mainStage.setScene(menuScene);
@@ -238,10 +247,14 @@ public class ChessBoardKnight extends Application {
         tutorialBtn.setOnAction(e -> showTutorialDialog());
         Tooltip.install(tutorialBtn, new Tooltip("See how the knight moves and the goal."));
 
+        Button highScoresBtn = secondaryButton("High Scores");
+        highScoresBtn.setOnAction(e -> showHighScoresDialog());
+        Tooltip.install(highScoresBtn, new Tooltip("View all high scores and records."));
+
         Button quitBtn = ghostButton("Quit");
         quitBtn.setOnAction(e -> mainStage.close());
 
-        HBox buttons = new HBox(12, startBtn, tutorialBtn, quitBtn);
+        HBox buttons = new HBox(12, startBtn, tutorialBtn, highScoresBtn, quitBtn);
         buttons.setAlignment(Pos.CENTER);
 
         // Keyboard shortcuts
@@ -303,9 +316,27 @@ public class ChessBoardKnight extends Application {
 
     private void updateLevelDetails(Level lvl) {
         if (lvl == null) { levelDetails.setText(""); return; }
+
+        // Completed tour records
+        int bestScore = highScoreManager.getBestScore(lvl.boardSize);
+        int fewestMoves = highScoreManager.getFewestMoves(lvl.boardSize);
+
+        // Incomplete attempt records
+        int bestAttemptScore = highScoreManager.getBestAttemptScore(lvl.boardSize);
+        int mostSquares = highScoreManager.getMostSquaresVisited(lvl.boardSize);
+
+        String scoreTxt = bestScore > 0 ? String.valueOf(bestScore) : "—";
+        String movesTxt = fewestMoves < 999 ? String.valueOf(fewestMoves) : "—";
+        String attemptScoreTxt = bestAttemptScore > 0 ? String.valueOf(bestAttemptScore) : "—";
+        String squaresTxt = mostSquares > 0 ? mostSquares + "/" + (lvl.boardSize * lvl.boardSize) : "—";
+
         String txt = String.format(
-                "Board: %dx%d • Points/Move: %d • Revisit Penalty: -%d • Undo Penalty: -%d",
-                lvl.boardSize, lvl.boardSize, lvl.pointsPerMove, lvl.revisitPenalty, lvl.undoPenalty
+                "Board: %dx%d • Points/Move: %d • Revisit: -%d • Undo: -%d\n" +
+                "✅ Completed: Score %s • Moves %s\n" +
+                "🎯 Best Attempt: Score %s • Squares %s",
+                lvl.boardSize, lvl.boardSize, lvl.pointsPerMove, lvl.revisitPenalty, lvl.undoPenalty,
+                scoreTxt, movesTxt,
+                attemptScoreTxt, squaresTxt
         );
         levelDetails.setText(txt);
     }
@@ -363,7 +394,7 @@ public class ChessBoardKnight extends Application {
 
     private void showTutorialDialog() {
         Alert a = new Alert(Alert.AlertType.INFORMATION);
-        a.setTitle("Knight’s Tour Tutorial");
+        a.setTitle("Knight's Tour Tutorial");
         a.setHeaderText("How the Knight Moves");
         a.setContentText(
                 "• The knight moves in an L-shape: 2 in one direction, 1 perpendicular.\n" +
@@ -376,14 +407,49 @@ public class ChessBoardKnight extends Application {
         a.showAndWait();
     }
 
+    private void showHighScoresDialog() {
+        StringBuilder content = new StringBuilder();
+
+        for (Level lvl : levels) {
+            // Completed tour records
+            int bestScore = highScoreManager.getBestScore(lvl.boardSize);
+            int fewestMoves = highScoreManager.getFewestMoves(lvl.boardSize);
+
+            // Incomplete attempt records
+            int bestAttemptScore = highScoreManager.getBestAttemptScore(lvl.boardSize);
+            int mostSquares = highScoreManager.getMostSquaresVisited(lvl.boardSize);
+
+            String scoreTxt = bestScore > 0 ? String.valueOf(bestScore) : "—";
+            String movesTxt = fewestMoves < 999 ? String.valueOf(fewestMoves) + " moves" : "—";
+            String attemptScoreTxt = bestAttemptScore > 0 ? String.valueOf(bestAttemptScore) : "—";
+            String squaresTxt = mostSquares > 0 ? mostSquares + "/" + (lvl.boardSize * lvl.boardSize) : "—";
+
+            content.append(String.format("━━━ %s ━━━\n", lvl.name));
+            content.append(String.format("✅ Completed Tour:\n"));
+            content.append(String.format("   🏆 Best Score: %s\n", scoreTxt));
+            content.append(String.format("   ⭐ Fewest Moves: %s\n", movesTxt));
+            content.append(String.format("🎯 Best Attempt:\n"));
+            content.append(String.format("   💰 Score: %s\n", attemptScoreTxt));
+            content.append(String.format("   📍 Squares: %s\n\n", squaresTxt));
+        }
+
+        Alert a = new Alert(Alert.AlertType.INFORMATION);
+        a.setTitle("High Scores");
+        a.setHeaderText("Knight's Tour Records");
+        a.setContentText(content.toString().trim());
+        a.showAndWait();
+    }
+
     // =========================================================
     // GAME SCENE / BOARD / LOGIC
     // =========================================================
     private void setupGameScene() {
         scoreLabel = new Label();
         scoreLabel.setFont(Font.font("Verdana", FontWeight.BOLD, 16));
+        scoreLabel.setTextFill(Color.WHITE);
         moveCountLabel = new Label();
         moveCountLabel.setFont(Font.font("Verdana", FontWeight.BOLD, 16));
+        moveCountLabel.setTextFill(Color.WHITE);
         winLabel = new Label("");
         winLabel.setFont(Font.font("Impact", FontWeight.BOLD, 28));
         winLabel.setStyle("-fx-text-fill: #06D6A0;");
@@ -395,7 +461,10 @@ public class ChessBoardKnight extends Application {
 
         Button backButton = new Button("Back to Menu");
         backButton.setFont(Font.font(16));
-        backButton.setOnAction(e -> mainStage.setScene(menuScene));
+        backButton.setOnAction(e -> {
+            checkIncompleteAttempt();
+            mainStage.setScene(menuScene);
+        });
 
         HBox controls = new HBox(12, scoreLabel, moveCountLabel, undoButton, backButton);
         controls.setAlignment(Pos.CENTER);
@@ -450,13 +519,18 @@ public class ChessBoardKnight extends Application {
         // First click sets starting position
         if (currentRow == -1 && currentCol == -1) {
             placeKnight(row, col, true);
+            soundManager.playMoveSound();
             return;
         }
         // Only legal knight moves allowed from current position
-        if (!isLegalKnightMove(currentRow, currentCol, row, col)) return;
+        if (!isLegalKnightMove(currentRow, currentCol, row, col)) {
+            soundManager.playInvalidSound();
+            return;
+        }
 
         boolean isRevisit = visited[row][col];
         placeKnight(row, col, !isRevisit);
+        soundManager.playMoveSound();
 
         // scoring
         if (isRevisit) {
@@ -467,7 +541,7 @@ public class ChessBoardKnight extends Application {
 
         // win?
         if (visitedCount() == boardSize * boardSize) {
-            winLabel.setText("Tour Complete! 🎉");
+            checkAndCelebrateHighScores();
         }
 
         updateUIStatus();
@@ -489,7 +563,7 @@ public class ChessBoardKnight extends Application {
 
         Button here = squares[row][col];
         here.setText("♞");
-        here.setStyle(here.getStyle() + "; -fx-text-fill: #111827; -fx-font-size: 18px; -fx-font-weight: bold;");
+        here.setStyle(here.getStyle() + "; -fx-text-fill: #111827; -fx-font-size: " + KNIGHT_ICON_SIZE + "px; -fx-font-weight: bold;");
 
         moveStack.push(new int[]{row, col});
         moveCount++;
@@ -503,7 +577,8 @@ public class ChessBoardKnight extends Application {
         for (int r = 0; r < boardSize; r++) {
             for (int c = 0; c < boardSize; c++) {
                 boolean light = ((r + c) % 2 == 0);
-                String base = "-fx-background-color: " + (light ? toRgb(LIGHT_COLOR) : toRgb(DARK_COLOR)) + ";";
+                String base = "-fx-background-color: " + (light ? toRgb(LIGHT_COLOR) : toRgb(DARK_COLOR)) + ";"
+                        + " -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 14px;";
                 if (visited != null && visited[r][c]) {
                     base += " -fx-background-insets: 0; -fx-background-radius: 0; -fx-border-color: rgba(0,0,0,0.18);";
                     base += " -fx-effect: null;";
@@ -555,6 +630,9 @@ public class ChessBoardKnight extends Application {
     private void undoMove() {
         if (moveStack.isEmpty()) return;
 
+        // Play undo sound
+        soundManager.playUndoSound();
+
         // Remove current
         moveStack.pop();
 
@@ -602,7 +680,7 @@ public class ChessBoardKnight extends Application {
         if (currentRow >= 0 && currentCol >= 0) {
             squares[currentRow][currentCol].setText("♞");
             squares[currentRow][currentCol].setStyle(squares[currentRow][currentCol].getStyle()
-                    + " -fx-background-color: " + toRgb(START_COLOR) + "; -fx-text-fill: #111827; -fx-font-size: 18px; -fx-font-weight: bold;");
+                    + " -fx-background-color: " + toRgb(START_COLOR) + "; -fx-text-fill: #111827; -fx-font-size: " + KNIGHT_ICON_SIZE + "px; -fx-font-weight: bold;");
         }
         refreshHighlights();
     }
@@ -611,6 +689,42 @@ public class ChessBoardKnight extends Application {
         scoreLabel.setText("Score: " + score);
         moveCountLabel.setText("Moves: " + moveCount);
         undoButton.setDisable(moveStack.isEmpty());
+    }
+
+    private void checkAndCelebrateHighScores() {
+        boolean newHighScore = highScoreManager.checkAndUpdateScore(boardSize, score);
+        boolean newBestMoves = highScoreManager.checkAndUpdateMoves(boardSize, moveCount);
+
+        // Play celebration sound
+        soundManager.playCompleteSound();
+
+        String message = "Tour Complete! 🎉";
+        if (newHighScore && newBestMoves) {
+            message += "\n🏆 NEW HIGH SCORE & BEST MOVES! 🏆";
+            soundManager.playHighScoreSound();
+        } else if (newHighScore) {
+            message += "\n🏆 NEW HIGH SCORE! 🏆";
+            soundManager.playHighScoreSound();
+        } else if (newBestMoves) {
+            message += "\n⭐ NEW BEST MOVES! ⭐";
+            soundManager.playHighScoreSound();
+        }
+
+        winLabel.setText(message);
+    }
+
+    private void checkIncompleteAttempt() {
+        // Only track if the game has actually started (at least one move made)
+        if (moveCount == 0 || currentRow == -1) return;
+
+        int squaresVisited = visitedCount();
+
+        // Don't track if tour was completed (already handled by checkAndCelebrateHighScores)
+        if (squaresVisited == boardSize * boardSize) return;
+
+        // Track best attempt score and most squares visited for incomplete tours
+        highScoreManager.checkAndUpdateAttemptScore(boardSize, score);
+        highScoreManager.checkAndUpdateSquaresVisited(boardSize, squaresVisited);
     }
 
     private void resetGame() {
@@ -634,20 +748,36 @@ public class ChessBoardKnight extends Application {
             gameRoot.getChildren().add(boardFrame);
         }
 
-        // Apply pattern only in Classic 8x8
-        applyPatternBackground(currentLevel != null && currentLevel.boardSize == 8);
+        // Apply pattern based on current level
+        applyPatternBackground(currentLevel != null ? currentLevel.boardSize : 0);
     }
 
     // =========================================================
     // Background pattern helpers (NEW)
     // =========================================================
 
-    private Image loadKnightPattern() {
+    private Image loadKnightPattern(int boardSize) {
+        // Determine which image to load based on board size
+        String imageName;
+        switch (boardSize) {
+            case 6:
+                imageName = "Knights_Tour_Easy.png";
+                break;
+            case 8:
+                imageName = "knights_pattern.png";
+                break;
+            case 10:
+                imageName = "Knights_Tour_Hard.png";
+                break;
+            default:
+                return null; // No pattern for other sizes
+        }
+
         // Try classpath first
         String[] paths = new String[]{
-                "/resources/images/knights_pattern.png",
-                "/images/knights_pattern.png",
-                "/knights_pattern.png"
+                "/resources/images/" + imageName,
+                "/images/" + imageName,
+                "/" + imageName
         };
         for (String p : paths) {
             try {
@@ -655,15 +785,15 @@ public class ChessBoardKnight extends Application {
                 if (url != null) return new Image(url.toExternalForm());
             } catch (Exception ignored) {}
         }
-        // Absolute Windows path you provided
+        // Absolute Windows path
         try {
-            java.io.File f1 = new java.io.File("C:\\Users\\ianrh\\IdeaProjects\\Knights_Tour_Game\\src\\resources\\images\\knights_pattern.png");
+            java.io.File f1 = new java.io.File("C:\\Users\\ianrh\\IdeaProjects\\Knights_Tour_Game\\src\\resources\\images\\" + imageName);
             if (f1.exists()) return new Image(f1.toURI().toString());
         } catch (Exception ignored) {}
 
         // Dev container fallback
         try {
-            java.io.File f2 = new java.io.File("/mnt/data/knights_pattern.png");
+            java.io.File f2 = new java.io.File("/mnt/data/" + imageName);
             if (f2.exists()) return new Image(f2.toURI().toString());
         } catch (Exception ignored) {}
 
@@ -671,21 +801,44 @@ public class ChessBoardKnight extends Application {
     }
 
     /** Turn the tiled pattern on/off behind the board (with a soft card under the grid). */
-    private void applyPatternBackground(boolean enable) {
-        if (!enable) {
+    private void applyPatternBackground(int boardSize) {
+        // Only apply pattern for Easy (6), Classic (8), and Hard (10)
+        if (boardSize != 6 && boardSize != 8 && boardSize != 10) {
             gameRoot.setBackground(Background.EMPTY);
             if (boardFrame != null) boardFrame.setStyle("");
             gameRoot.setPadding(new Insets(8));
             return;
         }
-        Image pat = loadKnightPattern();
-        if (pat == null) return;
+        Image pat = loadKnightPattern(boardSize);
+        if (pat == null) {
+            // No pattern found, use empty background
+            gameRoot.setBackground(Background.EMPTY);
+            if (boardFrame != null) boardFrame.setStyle("");
+            gameRoot.setPadding(new Insets(8));
+            return;
+        }
+
+        // Configure background based on board size
+        BackgroundRepeat repeatX, repeatY;
+        BackgroundSize bgSize;
+
+        if (boardSize == 10) {
+            // For Hard mode (10x10): Make tiles larger for better visibility
+            repeatX = BackgroundRepeat.REPEAT;
+            repeatY = BackgroundRepeat.REPEAT;
+            bgSize = new BackgroundSize(200, 200, false, false, false, false); // Larger tiles
+        } else {
+            // For Easy (6x6) and Classic (8x8): Use original auto-sizing
+            repeatX = BackgroundRepeat.REPEAT;
+            repeatY = BackgroundRepeat.REPEAT;
+            bgSize = new BackgroundSize(BackgroundSize.AUTO, BackgroundSize.AUTO, true, true, false, false);
+        }
 
         BackgroundImage bi = new BackgroundImage(
                 pat,
-                BackgroundRepeat.REPEAT, BackgroundRepeat.REPEAT,
+                repeatX, repeatY,
                 BackgroundPosition.CENTER,
-                new BackgroundSize(BackgroundSize.AUTO, BackgroundSize.AUTO, true, true, false, false)
+                bgSize
         );
         gameRoot.setBackground(new Background(bi));
 

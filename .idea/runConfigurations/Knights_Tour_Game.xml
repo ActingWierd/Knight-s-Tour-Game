@@ -2,7 +2,7 @@
   <configuration default="false" name="Knights Tour Game" type="Application" factoryName="Application">
     <option name="MAIN_CLASS_NAME" value="knightstour.game.ChessBoardKnight" />
     <module name="Knights_Tour_Game" />
-    <option name="VM_PARAMETERS" value="--module-path &quot;C:\Users\ianrh\Downloads\openjfx-24.0.1_windows-x64_bin-sdk\javafx-sdk-24.0.1\lib&quot; --add-modules javafx.controls,javafx.fxml,javafx.graphics,javafx.base" />
+    <option name="VM_PARAMETERS" value=" --module-path &quot;C:\Users\ianrh\Downloads\openjfx-25.0.1_windows-x64_bin-sdk\javafx-sdk-25.0.1\lib&quot; --add-modules javafx.controls,javafx.fxml,javafx.graphics,javafx.base,javafx.media --add-exports javafx.base/com.sun.javafx=ALL-UNNAMED --add-exports javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED" />
     <extension name="coverage">
       <pattern>
         <option name="PATTERN" value="knightstour.game.*" />
